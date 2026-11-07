@@ -1,0 +1,26 @@
+# 编译/固件大文件（二进制固件不纳入版本库）
+*.ubi
+*.bin
+*.tar.gz
+*.img
+*.itb
+*.ipk
+
+# sing-box 二进制（体积大，从官方 release 重新下载即可）
+sing-box
+sing-box-*/
+
+# 敏感/临时文件
+*.b64
+sub_real.txt
+sub_decoded.txt
+sub_noua.txt
+新建文本文档.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统
+Thumbs.db
+.DS_Store

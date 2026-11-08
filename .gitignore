@@ -21,6 +21,11 @@ sub_noua.txt
 __pycache__/
 *.pyc
 
+# 抓包/临时诊断文件
+*.pcapng
+*.etl
+capture.txt
+
 # 系统
 Thumbs.db
 .DS_Store

@@ -90,6 +90,7 @@ python ax6/sftp_upload.py
   3. 系统清理瘦身
   4. 自动选择组限定港新节点
   5. **OOM 崩溃重启修复**（第八节）
+  6. **内存优化 + 绕过大陆IP**（第九节）
 - **Redmi AX6**：见 [`ax6/Redmi-AX6-刷机与机场配置.md`](ax6/Redmi-AX6-刷机与机场配置.md)，涵盖：
   1. 刷机、改管理 IP、WAN/无线配置
   2. HomeProxy + sing-box 安装

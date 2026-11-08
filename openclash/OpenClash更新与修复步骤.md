@@ -565,3 +565,81 @@ for s in netdata haproxy openclash; do echo -n "$s: "; /etc/init.d/$s enabled 2>
   （不建议直接设 `-1000`，那会让内核在真泄漏时无进程可杀、只能 panic）。
 - 若未来内存仍紧张，可进一步：减少 DNS 服务器数量（当前 6 个 DoH/DoT 较重）、
   精简 rule-providers（当前 4 个远程 .mrs）、或增大 zram（当前 114MB）。
+
+---
+
+## 九、内存优化 + 绕过大陆IP（抖音卡顿根治）
+
+> 问题：抖音卡顿。根因是 256MB 内存设备上 clash 因 `info` 日志 + 6 个 DNS 上游 +
+> 114MB zram 导致内存耗尽、被 OOM 反复杀死。
+>
+> 方案：不换插件（passwall2 / HomeProxy / AdGuardHome 均因软件源缺失或内存不足不可行），
+> 直接优化现有 OpenClash + 开启内置「绕过大陆IP」。
+
+### 1. 精简配置（log-level / IPv6 / DNS）
+
+同时修改**源配置** `/etc/openclash/config/smjc.yaml` 和**运行配置** `/etc/openclash/smjc.yaml`：
+
+```bash
+# 源配置（含关闭 ipv6）
+sed -i 's/^log-level: info$/log-level: warning/; s/^  ipv6: true$/  ipv6: false/; /https:\/\/223\.5\.5\.5\/dns-query/d; /tls:\/\/223\.5\.5\.5/d; /tls:\/\/dot\.pub/d; /tls:\/\/dns\.alidns\.com/d' /etc/openclash/config/smjc.yaml
+
+# 运行配置（ipv6 已是 false，无需改）
+sed -i 's/^log-level: info$/log-level: warning/; /https:\/\/223\.5\.5\.5\/dns-query/d; /tls:\/\/223\.5\.5\.5/d; /tls:\/\/dot\.pub/d; /tls:\/\/dns\.alidns\.com/d' /etc/openclash/smjc.yaml
+```
+
+> 效果：日志 info → warning（日志体积从 416KB 回落到 8.6KB），DNS 上游从 6 个精简到
+> 2 个（`doh.pub` + `dns.alidns.com`）。
+
+### 2. 增大 zram 到 256MB
+
+```bash
+uci set system.@system[0].zram_size_mb='256'
+uci commit system
+# 先重启 OpenClash 释放 swap，再重启 zram（否则 swapoff 会因 swap 已满触发 OOM）
+/etc/init.d/openclash restart
+/etc/init.d/zram restart
+```
+
+> 说明：zram 脚本默认 `ram_size / 2048`（约 112MB），设 `zram_size_mb` 可覆盖。
+> swap 从 114MB 增到 256MB，物理内存 free 从 10MB 涨到 86MB。
+
+### 3. 开启「绕过大陆IP」★
+
+> ⚠️ 本设备是 **fw3/iptables**（`nft` 命令不存在），**不能照搬** deeprouter 那篇
+> fw4/nftables 的文章（其 3 条 `nft 'insert rule...'` 命令会直接报错）。
+> OpenClash 内置的「绕过大陆IP」在 iptables 环境同样生效，只需打开一个开关：
+
+```bash
+uci set openclash.config.china_ip_route='1'
+uci commit openclash
+/etc/init.d/openclash restart
+```
+
+> 对应 LuCI：「插件设置 → 实验性功能 → 绕过中国大陆IP」。
+> 原理：ipset 存 8616 条大陆 IP 段（`china_ip_route`），iptables `-m set --match-set`
+> 匹配后 `RETURN` 直连，国内流量不进 clash 内核，增强直连性能、降低资源占用。
+
+### 4. 验证
+
+```bash
+# 1. 绕过规则已生成（nat / mangle / output 三条链）
+iptables -t nat -S openclash | grep china_ip_route
+iptables -t mangle -S openclash | grep china_ip_route
+iptables -t nat -S openclash_output | grep china_ip_route
+
+# 2. 抖音 IP 命中大陆白名单（应返回 is in set）
+ipset test china_ip_route 183.201.88.108
+
+# 3. 观察绕过规则计数（刷抖音后 pkts 应增长）
+iptables -t nat -L openclash -n -v | grep china_ip_route
+
+# 4. clash 日志应无抖音流量（无输出 = 已绕过）
+tail -50 /tmp/openclash.log | grep -iE 'douyin|snssdk|ksyun'
+```
+
+> 抖音域名解析到的国内 CDN IP（`183.201.x` / `111.62.x` / `36.143.x`）全部命中
+> `china_ip_route`，实测 curl 抖音 CDN 返回 403（kngx 金山云）即证明流量已直连绕过 clash。
+
+> ⚠️ 当前 `en_mode` 为 `redir-host`（文章强调需要 fake-ip）。在 redir-host 下
+> `china_ip_route_pass` 集合可能不完整，但基础的 `china_ip_route` 白名单绕过不受影响。
